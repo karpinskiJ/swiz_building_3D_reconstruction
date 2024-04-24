@@ -9,6 +9,10 @@ Program będzie tworzyć chmurę punktów w przestrzeni 3D reprezentujących szk
 - Jakub Karpiński 
 - Krzysztof Miśków 
 
+## Zbiór Danych
+Wykorzystamy poniższy zbiór danych zawierający zdjęcia z budynków oraz parametry kamer
+https://www.robots.ox.ac.uk/~vgg/data/mview/
+
 ## Technologie
 
 - **Python**: Język programowania.
