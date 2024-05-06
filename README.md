@@ -15,8 +15,9 @@ Program będzie tworzyć chmurę punktów w przestrzeni 3D reprezentujących szk
 - Mając macierz podstawową lub zasadniczą, przyjmij P1 = [I 0] i oblicz parametry kamery 2.
 - Wykonaj triangulację, wiedząc, że x1 = P1 * X i x2 = P2 * X.
 - Dostosowanie wiązki w celu zminimalizowania błędów odwzorowania i dopracowania współrzędnych 3D.
-
-Przetłumaczono z DeepL.com (wersja darmowa)
+- Wyznaczenie punktow charaktersyttycznych chmury.
+- Dopasowanie kolejnych chmur punktow ICP PCA 3d cloud. 
+- Opracowanie metody wyznacznia plaszczyn bazwoych dla scian
 
 ## Autorzy
 - Jakub Karpiński 
