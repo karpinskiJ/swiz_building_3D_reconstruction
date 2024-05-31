@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import cv2
 
 def read_camera_params(path) -> np.array:
     result = []
@@ -13,13 +14,14 @@ def read_camera_params(path) -> np.array:
         result.append(res)
     return np.asarray(result).astype(np.float64)
 
-def read_points_3d(path) -> np.array:
-    with open(os.path.join(path,'house.p3d'), 'r') as file:
-                result = []
-                for line in file:
-                    result.append([(token if token != '*' else -1)
-                                for token in line.strip().split()])
-    return np.asarray(result).astype(np.float64)
+def read_images(path):
+    result = []
+    for file_path in os.listdir(path):
+        if file_path.endswith('.pgm'):
+            img = cv2.imread(os.path.join(path,file_path))
+                
+        result.append(img)
+    return result
 
 if __name__ == '__main__':
     print(read_camera_params('data/camera_params')[0])
