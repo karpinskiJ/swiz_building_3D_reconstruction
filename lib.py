@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from matplotlib import pyplot as plt
+from scipy.optimize import least_squares
 
 class Camera:
     def __init__(self, P):
@@ -82,3 +83,87 @@ def triangulate_points(cam1, cam2, points1, points2):
     points4D = cv2.triangulatePoints(cam1.getP(), cam2.getP(), points1.T, points2.T)
     points4D /= points4D[3]
     return points4D
+
+def reprojection_error(params, points2D, camera_indices, point_indices, P):
+    n_cameras = P.shape[0]
+    n_points = points2D.shape[0]
+    camera_params = params[:n_cameras * 12].reshape((n_cameras, 3, 4))
+    points_3d = params[n_cameras * 12:].reshape((n_points, 3))
+
+    projected_points = np.zeros((n_points, 2))
+    for i in range(n_points):
+        camera_index = camera_indices[i]
+        point_3d = np.hstack((points_3d[i], 1))
+        proj_2d = camera_params[camera_index] @ point_3d
+        projected_points[i] = proj_2d[:2] / proj_2d[2]
+
+    return (projected_points - points2D).ravel()
+
+def bundle_adjustment(points_3d, points2D, camera_indices, point_indices, P):
+    n_cameras = P.shape[0]
+    n_points = points_3d.shape[0]
+    camera_params = P.reshape((n_cameras, 12))
+    x0 = np.hstack((camera_params.ravel(), points_3d.ravel()))
+    res = least_squares(reprojection_error, x0, verbose=2, x_scale='jac', ftol=1e-4, method='trf', args=(points2D, camera_indices, point_indices, P))
+    return res.x[n_cameras * 12:].reshape((n_points, 3))
+
+
+def icp(A, B, max_iterations=20, tolerance=1e-5):
+    src = np.copy(A.T)
+    dst = np.copy(B.T)
+
+    prev_error = 0
+
+    for i in range(max_iterations):
+        distances, indices = nearest_neighbor(src, dst)
+        T = best_fit_transform(src, dst[:, indices])
+
+        src = (T @ np.vstack((src, np.ones((1, src.shape[1])))))[:3]
+
+        mean_error = np.mean(distances)
+        if np.abs(prev_error - mean_error) < tolerance:
+            break
+        prev_error = mean_error
+
+    T = best_fit_transform(A.T, src)
+    return T, distances
+
+def nearest_neighbor(src, dst):
+    from sklearn.neighbors import NearestNeighbors
+    neigh = NearestNeighbors(n_neighbors=1)
+    neigh.fit(dst.T)
+    distances, indices = neigh.kneighbors(src.T, return_distance=True)
+    return distances.ravel(), indices.ravel()
+
+def best_fit_transform(A, B):
+    assert A.shape == B.shape
+
+    centroid_A = np.mean(A, axis=1)
+    centroid_B = np.mean(B, axis=1)
+
+    Am = A - centroid_A[:, None]
+    Bm = B - centroid_B[:, None]
+
+    H = Am @ Bm.T
+
+    U, S, Vt = np.linalg.svd(H)
+    R = Vt.T @ U.T
+
+    if np.linalg.det(R) < 0:
+        Vt[-1, :] *= -1
+        R = Vt.T @ U.T
+
+    t = centroid_B - R @ centroid_A
+
+    T = np.identity(4)
+    T[:3, :3] = R
+    T[:3, 3] = t
+
+    return T
+
+def pca_base_plane(points_3d):
+    mean = np.mean(points_3d, axis=1)
+    centered_points = points_3d - mean[:, np.newaxis]
+    U, S, Vt = np.linalg.svd(centered_points.T)
+    normal = Vt[-1]
+    return normal, mean
