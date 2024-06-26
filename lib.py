@@ -6,95 +6,115 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-
-def find_keypoints( image_0, image_1):
+def find_keypoints(image_1, image_2):
     sift = cv2.xfeatures2d.SIFT_create()
-    image_0_grey = cv2.cvtColor(image_0, cv2.COLOR_BGR2GRAY)
-    image_1_grey = cv2.cvtColor(image_1, cv2.COLOR_BGR2GRAY)
-    key_points_0, desc_0 = sift.detectAndCompute(image_0_grey, None)
-    key_points_1, desc_1 = sift.detectAndCompute(image_1_grey, None)
+    image_1_gray = cv2.cvtColor(image_1, cv2.COLOR_BGR2GRAY)
+    image_2_gray = cv2.cvtColor(image_2, cv2.COLOR_BGR2GRAY)
+    keypoints_1, descriptors_1 = sift.detectAndCompute(image_1_gray, None)
+    keypoints_2, descriptors_2 = sift.detectAndCompute(image_2_gray, None)
 
-    bf = cv2.BFMatcher()
-    matches = bf.knnMatch(desc_0, desc_1, k=2)
-    feature = []
+    bf_matcher = cv2.BFMatcher()
+    matches = bf_matcher.knnMatch(descriptors_1, descriptors_2, k=2)
+    good_matches = []
     for m, n in matches:
         if m.distance < 0.70 * n.distance:
-            feature.append(m)
-    return np.float32([key_points_0[m.queryIdx].pt for m in feature]), np.float32([key_points_1[m.trainIdx].pt for m in feature])
+            good_matches.append(m)
+    return np.float32([keypoints_1[m.queryIdx].pt for m in good_matches]), np.float32([keypoints_2[m.trainIdx].pt for m in good_matches])
 
+def reprojection_error(object_points, image_points, transformation_matrix, camera_matrix, is_homogeneous):
+    rotation_matrix = transformation_matrix[:3, :3]
+    translation_vector = transformation_matrix[:3, 3]
+    rotation_vector, _ = cv2.Rodrigues(rotation_matrix)
+    if is_homogeneous:
+        object_points = cv2.convertPointsFromHomogeneous(object_points.T)
+    projected_points, _ = cv2.projectPoints(object_points, rotation_vector, translation_vector, camera_matrix, None)
+    projected_points = np.float32(projected_points[:, 0, :])
+    total_error = cv2.norm(projected_points, np.float32(image_points.T) if is_homogeneous else np.float32(image_points), cv2.NORM_L2)
+    return total_error / len(projected_points), object_points
 
-def reprojection_error(obj_points, image_points, transform_matrix, K, homogenity):
-    rot_matrix = transform_matrix[:3, :3]
-    tran_vector = transform_matrix[:3, 3]
-    rot_vector, _ = cv2.Rodrigues(rot_matrix)
-    if homogenity == 1:
-        obj_points = cv2.convertPointsFromHomogeneous(obj_points.T)
-    image_points_calc, _ = cv2.projectPoints(obj_points, rot_vector, tran_vector, K, None)
-    image_points_calc = np.float32(image_points_calc[:, 0, :])
-    total_error = cv2.norm(image_points_calc, np.float32(image_points.T) if homogenity == 1 else np.float32(image_points), cv2.NORM_L2)
-    return total_error / len(image_points_calc), obj_points
+def PnP(object_points, image_points, camera_matrix, distortion_coeffs, rotation_vector, is_initial):
+    if is_initial:
+        object_points = object_points[:, 0, :]
+        image_points = image_points.T
+        rotation_vector = rotation_vector.T
+    _, calculated_rotation_vector, translation_vector, inliers = cv2.solvePnPRansac(object_points, image_points, camera_matrix, distortion_coeffs, cv2.SOLVEPNP_ITERATIVE)
+    calculated_rotation_matrix, _ = cv2.Rodrigues(calculated_rotation_vector)
 
-def PnP(obj_point, image_point , K, dist_coeff, rot_vector, initial):
-    if initial == 1:
-        obj_point = obj_point[:, 0 ,:]
-        image_point = image_point.T
-        rot_vector = rot_vector.T 
-    _, rot_vector_calc, tran_vector, inlier = cv2.solvePnPRansac(obj_point, image_point, K, dist_coeff, cv2.SOLVEPNP_ITERATIVE)
-    rot_matrix, _ = cv2.Rodrigues(rot_vector_calc)
+    if inliers is not None:
+        image_points = image_points[inliers[:, 0]]
+        object_points = object_points[inliers[:, 0]]
+        rotation_vector = rotation_vector[inliers[:, 0]]
+    return calculated_rotation_matrix, translation_vector, image_points, object_points, rotation_vector
 
-    if inlier is not None:
-        image_point = image_point[inlier[:, 0]]
-        obj_point = obj_point[inlier[:, 0]]
-        rot_vector = rot_vector[inlier[:, 0]]
-    return rot_matrix, tran_vector, image_point, obj_point, rot_vector
-
-def common_points( image_points_1, image_points_2, image_points_3):
-    cm_points_1 = []
-    cm_points_2 = []
+def matching_points(image_points_1, image_points_2, image_points_3):
+    common_points_1 = []
+    common_points_2 = []
     for i in range(image_points_1.shape[0]):
-        a = np.where(image_points_2 == image_points_1[i, :])
-        if a[0].size != 0:
-            cm_points_1.append(i)
-            cm_points_2.append(a[0][0])
+        match_indices = np.where(image_points_2 == image_points_1[i, :])
+        if match_indices[0].size != 0:
+            common_points_1.append(i)
+            common_points_2.append(match_indices[0][0])
 
-    mask_array_1 = np.ma.array(image_points_2, mask=False)
-    mask_array_1.mask[cm_points_2] = True
-    mask_array_1 = mask_array_1.compressed()
-    mask_array_1 = mask_array_1.reshape(int(mask_array_1.shape[0] / 2), 2)
+    masked_array_1 = np.ma.array(image_points_2, mask=False)
+    masked_array_1.mask[common_points_2] = True
+    masked_array_1 = masked_array_1.compressed()
+    masked_array_1 = masked_array_1.reshape(int(masked_array_1.shape[0] / 2), 2)
 
-    mask_array_2 = np.ma.array(image_points_3, mask=False)
-    mask_array_2.mask[cm_points_2] = True
-    mask_array_2 = mask_array_2.compressed()
-    mask_array_2 = mask_array_2.reshape(int(mask_array_2.shape[0] / 2), 2)
-    print(" Shape New Array", mask_array_1.shape, mask_array_2.shape)
-    return np.array(cm_points_1), np.array(cm_points_2), mask_array_1, mask_array_2
+    masked_array_2 = np.ma.array(image_points_3, mask=False)
+    masked_array_2.mask[common_points_2] = True
+    masked_array_2 = masked_array_2.compressed()
+    masked_array_2 = masked_array_2.reshape(int(masked_array_2.shape[0] / 2), 2)
+    return np.array(common_points_1), np.array(common_points_2), masked_array_1, masked_array_2
 
-def optimal_reprojection_error(obj_points) -> np.array:
-    transform_matrix = obj_points[0:12].reshape((3,4))
-    K = obj_points[12:21].reshape((3,3))
-    rest = int(len(obj_points[21:]) * 0.4)
-    p = obj_points[21:21 + rest].reshape((2, int(rest/2))).T
-    obj_points = obj_points[21 + rest:].reshape((int(len(obj_points[21 + rest:])/3), 3))
-    rot_matrix = transform_matrix[:3, :3]
-    tran_vector = transform_matrix[:3, 3]
-    rot_vector, _ = cv2.Rodrigues(rot_matrix)
-    image_points, _ = cv2.projectPoints(obj_points, rot_vector, tran_vector, K, None)
-    image_points = image_points[:, 0, :]
-    error = [ (p[idx] - image_points[idx])**2 for idx in range(len(p))]
-    return np.array(error).ravel()/len(p)
+def optimal_reprojection_error(params) -> np.array:
+    transformation_matrix = params[0:12].reshape((3, 4))
+    camera_matrix = params[12:21].reshape((3, 3))
+    num_points = int(len(params[21:]) * 0.4)
+    image_points = params[21:21 + num_points].reshape((2, int(num_points / 2))).T
+    object_points = params[21 + num_points:].reshape((int(len(params[21 + num_points:]) / 3), 3))
+    rotation_matrix = transformation_matrix[:3, :3]
+    translation_vector = transformation_matrix[:3, 3]
+    rotation_vector, _ = cv2.Rodrigues(rotation_matrix)
+    projected_points, _ = cv2.projectPoints(object_points, rotation_vector, translation_vector, camera_matrix, None)
+    projected_points = projected_points[:, 0, :]
+    errors = [(image_points[idx] - projected_points[idx])**2 for idx in range(len(image_points))]
+    return np.array(errors).ravel() / len(image_points)
 
-def bundle_adjustment( _3d_point, opt, transform_matrix_new, K, r_error) -> tuple:
-    opt_variables = np.hstack((transform_matrix_new.ravel(), K.ravel()))
-    opt_variables = np.hstack((opt_variables, opt.ravel()))
-    opt_variables = np.hstack((opt_variables, _3d_point.ravel()))
+def bundle_adjustment(object_points, image_points, initial_transformation_matrix, initial_camera_matrix, reprojection_threshold) -> tuple:
+    optimization_variables = np.hstack((initial_transformation_matrix.ravel(), initial_camera_matrix.ravel()))
+    optimization_variables = np.hstack((optimization_variables, image_points.ravel()))
+    optimization_variables = np.hstack((optimization_variables, object_points.ravel()))
 
-    values_corrected = least_squares(optimal_reprojection_error, opt_variables, gtol = r_error).x
-    K = values_corrected[12:21].reshape((3,3))
-    rest = int(len(values_corrected[21:]) * 0.4)
-    return values_corrected[21 + rest:].reshape((int(len(values_corrected[21 + rest:])/3), 3)), values_corrected[21:21 + rest].reshape((2, int(rest/2))).T, values_corrected[0:12].reshape((3,4))
+    optimized_values = least_squares(optimal_reprojection_error, optimization_variables, gtol=reprojection_threshold).x
+    optimized_camera_matrix = optimized_values[12:21].reshape((3, 3))
+    num_points = int(len(optimized_values[21:]) * 0.4)
+    optimized_image_points = optimized_values[21:21 + num_points].reshape((2, int(num_points / 2))).T
+    optimized_object_points = optimized_values[21 + num_points:].reshape((int(len(optimized_values[21 + num_points:]) / 3), 3))
+    optimized_transformation_matrix = optimized_values[0:12].reshape((3, 4))
+    return optimized_object_points, optimized_image_points, optimized_transformation_matrix
 
-def triangulation(point_2d_1, point_2d_2, pm_1, pm_2):
-    pm_1 = pm_1.T
-    pm_2 = pm_2.T
-    pt_cloud = cv2.triangulatePoints(point_2d_1, point_2d_2, pm_1, pm_2)
-    return pm_1, pm_2, (pt_cloud / pt_cloud[3])  
+def triangulation(image_points_1, image_points_2, projection_matrix_1, projection_matrix_2):
+    projection_matrix_1 = projection_matrix_1.T
+    projection_matrix_2 = projection_matrix_2.T
+    point_cloud = cv2.triangulatePoints(image_points_1, image_points_2, projection_matrix_1, projection_matrix_2)
+    return projection_matrix_1, projection_matrix_2, (point_cloud / point_cloud[3])
+
+def plot_3d_points(total_points, total_colors):
+
+    total_points = np.array(total_points)
+    total_colors = np.array(total_colors)
+
+    x = total_points[:, 0]
+    y = total_points[:, 1]
+    z = total_points[:, 2]
+
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter(x, y, z, c=total_colors / 255.0)  
+
+    ax.set_xlabel('X axis')
+    ax.set_ylabel('Y axis')
+    ax.set_zlabel('Z axis')
+
+    plt.show()
