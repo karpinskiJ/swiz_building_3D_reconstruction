@@ -1,28 +1,34 @@
-import os
-import numpy as np
 import cv2
+import numpy as np
+import os
 
-def read_camera_params(path) -> np.array:
-    result = []
-    for file_path in os.listdir(path):
-        if file_path.endswith('.P'):
-            with open(os.path.join(path,file_path), 'r') as file:
-                res = []
-                for line in file:
-                    res.append([(token if token != '*' else -1)
-                                for token in line.strip().split()])
-        result.append(res)
-    return np.asarray(result).astype(np.float64)
+class Image():
+    def __init__(self, img_path):
+        with open(os.path.join(img_path, 'K.txt')) as f:
+            lines = f.read().split('\n')
+            matrix = []
+            for line in lines:
+                values = line.strip().split(' ')
+                float_values = list(map(float, values))
+                matrix.append(float_values)
+            self.K = np.array(matrix)
+            self.image_list = []
 
-def read_images(path):
-    result = []
-    for file_path in os.listdir(path):
-        if file_path.endswith('.pgm'):
-            img = cv2.imread(os.path.join(path,file_path))
-                
-        result.append(img)
-    return result
+        for image in sorted(os.listdir(img_path)):
+            if image.lower().endswith(('.jpg', '.png')):
+                self.image_list.append(os.path.join(img_path, image))
 
-if __name__ == '__main__':
-    print(read_camera_params('data/camera_params')[0])
-    pass
+        self.path = os.getcwd()
+        self.factor = 2 # scale factor = 2, obtained experimentaly
+        self.downscale()
+
+    def downscale(self):
+        self.K[0, 0] /= self.factor
+        self.K[1, 1] /= self.factor
+        self.K[0, 2] /= self.factor
+        self.K[1, 2] /= self.factor
+
+    def downscale_image(self, image):
+        for _ in range(1,int(self.factor / 2) + 1):
+            image = cv2.pyrDown(image)
+        return image
