@@ -2,7 +2,6 @@ import cv2
 import numpy as np
 import os
 from scipy.optimize import least_squares
-# from tomlkit import boolean
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -24,7 +23,7 @@ def find_keypoints( image_0, image_1):
     return np.float32([key_points_0[m.queryIdx].pt for m in feature]), np.float32([key_points_1[m.trainIdx].pt for m in feature])
 
 
-def reprojection_error(obj_points, image_points, transform_matrix, K, homogenity) ->tuple:
+def reprojection_error(obj_points, image_points, transform_matrix, K, homogenity):
     rot_matrix = transform_matrix[:3, :3]
     tran_vector = transform_matrix[:3, 3]
     rot_vector, _ = cv2.Rodrigues(rot_matrix)
@@ -35,7 +34,7 @@ def reprojection_error(obj_points, image_points, transform_matrix, K, homogenity
     total_error = cv2.norm(image_points_calc, np.float32(image_points.T) if homogenity == 1 else np.float32(image_points), cv2.NORM_L2)
     return total_error / len(image_points_calc), obj_points
 
-def PnP(obj_point, image_point , K, dist_coeff, rot_vector, initial) ->  tuple:
+def PnP(obj_point, image_point , K, dist_coeff, rot_vector, initial):
     if initial == 1:
         obj_point = obj_point[:, 0 ,:]
         image_point = image_point.T
@@ -49,7 +48,7 @@ def PnP(obj_point, image_point , K, dist_coeff, rot_vector, initial) ->  tuple:
         rot_vector = rot_vector[inlier[:, 0]]
     return rot_matrix, tran_vector, image_point, obj_point, rot_vector
 
-def common_points( image_points_1, image_points_2, image_points_3) -> tuple:
+def common_points( image_points_1, image_points_2, image_points_3):
     cm_points_1 = []
     cm_points_2 = []
     for i in range(image_points_1.shape[0]):
@@ -69,6 +68,7 @@ def common_points( image_points_1, image_points_2, image_points_3) -> tuple:
     mask_array_2 = mask_array_2.reshape(int(mask_array_2.shape[0] / 2), 2)
     print(" Shape New Array", mask_array_1.shape, mask_array_2.shape)
     return np.array(cm_points_1), np.array(cm_points_2), mask_array_1, mask_array_2
+
 def optimal_reprojection_error(obj_points) -> np.array:
     transform_matrix = obj_points[0:12].reshape((3,4))
     K = obj_points[12:21].reshape((3,3))
@@ -93,33 +93,8 @@ def bundle_adjustment( _3d_point, opt, transform_matrix_new, K, r_error) -> tupl
     rest = int(len(values_corrected[21:]) * 0.4)
     return values_corrected[21 + rest:].reshape((int(len(values_corrected[21 + rest:])/3), 3)), values_corrected[21:21 + rest].reshape((2, int(rest/2))).T, values_corrected[0:12].reshape((3,4))
 
-def triangulation(point_2d_1, point_2d_2, projection_matrix_1, projection_matrix_2) -> tuple:
-    pt_cloud = cv2.triangulatePoints(point_2d_1, point_2d_2, projection_matrix_1.T, projection_matrix_2.T)
-    return projection_matrix_1.T, projection_matrix_2.T, (pt_cloud / pt_cloud[3])  
-
-def to_ply(path, point_cloud, colors):
-        out_points = point_cloud.reshape(-1, 3) * 200
-        out_colors = colors.reshape(-1, 3)
-        print(out_colors.shape, out_points.shape)
-        verts = np.hstack([out_points, out_colors])
-
-
-        mean = np.mean(verts[:, :3], axis=0)
-        scaled_verts = verts[:, :3] - mean
-        dist = np.sqrt(scaled_verts[:, 0] ** 2 + scaled_verts[:, 1] ** 2 + scaled_verts[:, 2] ** 2)
-        indx = np.where(dist < np.mean(dist) + 300)
-        verts = verts[indx]
-        ply_header = '''ply
-            format ascii 1.0
-            element vertex %(vert_num)d
-            property float x
-            property float y
-            property float z
-            property uchar blue
-            property uchar green
-            property uchar red
-            end_header
-            '''
-        with open(path + '\\res\\' + img_obj.image_list[0].split('\\')[-2] + '.ply', 'w') as f:
-            f.write(ply_header % dict(vert_num=len(verts)))
-            np.savetxt(f, verts, '%f %f %f %d %d %d')  
+def triangulation(point_2d_1, point_2d_2, pm_1, pm_2):
+    pm_1 = pm_1.T
+    pm_2 = pm_2.T
+    pt_cloud = cv2.triangulatePoints(point_2d_1, point_2d_2, pm_1, pm_2)
+    return pm_1, pm_2, (pt_cloud / pt_cloud[3])  
